@@ -1,11 +1,8 @@
 --[[
-    Tail returns a table to the caller with one line per index. For this
-    reason, the caller should be mindful of his/her line sizes and number of
-    lines being requested with respect to the potential memory requirements
-    of such a table.
+    Tail writes the lesser of n lines or all lines in the passed file to
+    io.stdout in 8K blocks.
     
-    To do:  if possible, optimize to return a stream of blocks to the caller
-            to better avoid potential memory bottlenecks.
+    Usage: tail("/path/to/file", last_n_lines)
 --]]
 
 local function get_block(file, offset, BUFSIZE)
@@ -80,29 +77,51 @@ local function get_offset(file_to_read, n_lines, filesize)
   return 0
 end
 
-local function tailer(file_to_read, n_lines)
+--[[
+    So as not to clutter the global namespace, we only expose the tail()
+    function to the caller. All other functions are local.
+--]]
+
+function tail(file_to_read, n_lines)
+  -- Check for valid input parameters.
+  assert(type(file_to_read) == 'string')
+  assert(#file_to_read > 0)
+  assert(type(n_lines) == 'number')
+  assert(n_lines > 0)
+  assert(n_lines % 1 == 0)
+  
   local file = assert(io.open(file_to_read, "r"))
   local size = file:seek("end")
   local offset = get_offset(file, n_lines, size)
-  local num_of_bytes = size - offset
+  
+  --[[
+      The file may have been appended since we first opened it. Therefore, we
+      specify the number of bytes to be read.
+  --]]
+  local to_be_read = size - offset
+  local buffer = ''
+  local BUFSIZE = 2^13
   file:seek("set", offset)
-  local lines = file:read(num_of_bytes)
-  file:close()
-  local lines_table = {}
 
-  for line in lines:gmatch('[^\n]+') do
-    lines_table[#lines_table + 1] = line
+  --[[
+      To avoid potential memory bottlenecks in output, we read 8K blocks and
+      write them to stdout. Redirection of stdout, if desired, is left to the
+      caller.
+  --]]
+  while to_be_read >= BUFSIZE do
+    buffer = file:read(BUFSIZE)
+    if buffer == nil then break end
+    io.stdout:write(buffer)
+    to_be_read = to_be_read - BUFSIZE
   end
-  return lines_table
+  
+  if to_be_read > 0 then
+    BUFSIZE = to_be_read
+    buffer = file:read(BUFSIZE)
+    io.stdout:write(buffer)
+    end
+  end
+  
+  file:close()
+  return
 end
-
---[[
-    So as not to clutter the global namespace, we only export the one
-    function necessary to use this package. All other functions are private.
---]]
-
-local functions = {}
-tail = functions
-tail = {
-  tail = tailer
-  }
