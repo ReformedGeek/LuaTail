@@ -81,14 +81,13 @@ end
     So as not to clutter the global namespace, we only expose the tail()
     function to the caller. All other functions are local.
 --]]
-
 function tail(file_to_read, n_lines)
-  -- Check for valid input parameters.
-  assert(type(file_to_read) == 'string')
-  assert(#file_to_read > 0)
-  assert(type(n_lines) == 'number')
-  assert(n_lines > 0)
-  assert(n_lines % 1 == 0)
+  if type(file_to_read) ~= 'string' or #file_to_read < 1 then
+    error("non-empty string expected.", 2)
+  end
+  if type(n_lines) ~= 'number' or n_lines < 1 or n_lines % 1 ~= 0 then
+    error("positive integer expected.", 2)
+  end
   
   local file = assert(io.open(file_to_read, "r"))
   local size = file:seek("end")
@@ -110,7 +109,9 @@ function tail(file_to_read, n_lines)
   --]]
   while to_be_read >= BUFSIZE do
     buffer = file:read(BUFSIZE)
-    if buffer == nil then break end
+    if not buffer then
+      error("Encountered an error while reading file; got nil instead of a string.")
+    end
     io.stdout:write(buffer)
     to_be_read = to_be_read - BUFSIZE
   end
@@ -119,7 +120,6 @@ function tail(file_to_read, n_lines)
     BUFSIZE = to_be_read
     buffer = file:read(BUFSIZE)
     io.stdout:write(buffer)
-    end
   end
   
   file:close()
