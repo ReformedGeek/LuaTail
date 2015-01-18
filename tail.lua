@@ -3,11 +3,21 @@
     io.stdout in 8K blocks.
     
     Usage: tail("/path/to/file", last_n_lines)
+    
+    Files which are appended during runtime are accommodated without raising an
+    error; we define our tail such that it returns n lines from the end of the
+    file at the time when it was called.
+    
+    Files which are truncated during runtime raise an error indicating that we
+    encountered an unexpected EOF.
 --]]
 
 local function get_block(file, offset, BUFSIZE)
   file:seek("set", offset)
   local block = file:read(BUFSIZE)
+  if not block or #block ~= BUFSIZE then
+      error("Unexpected EOF; possible file truncation.")
+  end
   return block
 end
 
@@ -109,8 +119,8 @@ function tail(file_to_read, n_lines)
   --]]
   while to_be_read >= BUFSIZE do
     buffer = file:read(BUFSIZE)
-    if not buffer then
-      error("Encountered an error while reading file; got nil instead of a string.")
+    if not buffer or #buffer ~= BUFSIZE then
+      error("Unexpected EOF; possible file truncation.")
     end
     io.stdout:write(buffer)
     to_be_read = to_be_read - BUFSIZE
@@ -119,6 +129,9 @@ function tail(file_to_read, n_lines)
   if to_be_read > 0 then
     BUFSIZE = to_be_read
     buffer = file:read(BUFSIZE)
+    if not buffer or #buffer ~= BUFSIZE then
+      error("Unexpected EOF; possible file truncation.")
+    end
     io.stdout:write(buffer)
   end
   
