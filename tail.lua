@@ -52,15 +52,11 @@ local function get_offset(file_to_read, n_lines, filesize)
     buffer = get_block(file_to_read, initial_offset, BUFSIZE)
     newline_count, str_offset = newline_counter(buffer, lines_remaining)
     if str_offset then
-      break
+      local offset = initial_offset + str_offset
+      return offset
     end 
     lines_remaining = lines_remaining - newline_count
     initial_offset = initial_offset - BUFSIZE
-  end
-
-  if str_offset then
-    local offset = initial_offset + str_offset
-    return offset
   end
   
   if initial_offset < 0 then
