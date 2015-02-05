@@ -1,8 +1,12 @@
 --[[
     Tail writes the lesser of n lines or all lines in the passed file to
-    io.stdout in 8K blocks.
+    io.stdout in 8K blocks or, optionally, returns a table.
     
-    Usage: tail("/path/to/file", last_n_lines)
+    Usage: tail("/path/to/file", last_n_lines, [stream])
+    
+    Optional boolean stream parameter specifies whether a stream to stdout is
+    desired. If false, a table of lines is returned with one line per index.
+    If stream parameter is omitted, true is assumed.
     
     Files which are appended during runtime are accommodated without raising an
     error; we define our tail such that it returns n lines from the end of the
@@ -87,50 +91,111 @@ end
     So as not to clutter the global namespace, we only expose the tail()
     function to the caller. All other functions are local.
 --]]
-function tail(file_to_read, n_lines)
+function tail(file_to_read, n_lines, stream)
   if type(file_to_read) ~= 'string' or #file_to_read < 1 then
-    error("non-empty string expected.", 2)
+    error("non-empty string expected.")
   end
   if type(n_lines) ~= 'number' or n_lines < 1 or n_lines % 1 ~= 0 then
-    error("positive integer expected.", 2)
+    error("positive integer expected.")
+  end
+  if type(stream) ~= 'boolean' and type(stream) ~= nil then
+    error("expected boolean or nil.")
   end
   
   local file = assert(io.open(file_to_read, "r"))
   local size = file:seek("end")
   local offset = get_offset(file, n_lines, size)
   
-  --[[
-      The file may have been appended since we first opened it. Therefore, we
-      specify the number of bytes to be read.
-  --]]
+--[[
+    The file may have been appended since we first opened it. Therefore, we
+    specify the number of bytes to be read.
+--]]
   local to_be_read = size - offset
   local buffer = ''
   local BUFSIZE = 2^13
   file:seek("set", offset)
 
-  --[[
-      To avoid potential memory bottlenecks in output, we read 8K blocks and
-      write them to stdout. Redirection of stdout, if desired, is left to the
-      caller.
-  --]]
+--[[
+    To avoid potential memory bottlenecks in output, we read 8K blocks and
+    write them to stdout or, if tail() was called with stream = false, build
+    a table of lines to return. Redirection of the stdout stream, if desired,
+    is left to the caller.
+--]]
+  if stream == true or stream == nil then
+    while to_be_read >= BUFSIZE do
+      buffer = file:read(BUFSIZE)
+      if not buffer or #buffer ~= BUFSIZE then
+        error("Unexpected EOF; possible file truncation.")
+      end
+      io.stdout:write(buffer)
+      to_be_read = to_be_read - BUFSIZE
+    end
+  
+  
+    if to_be_read > 0 then
+      BUFSIZE = to_be_read
+      buffer = file:read(BUFSIZE)
+      if not buffer or #buffer ~= BUFSIZE then
+        error("Unexpected EOF; possible file truncation.")
+      end
+      io.stdout:write(buffer)
+    end
+    file:close()
+    return
+  end
+  
+--[[
+    To save on memory during the process of building our table, we read in 8K
+    blocks and split them up into the constituent lines. However, this does not
+    mean that we have eliminated all need to care about memory when calling the
+    tail() function with stream = false. In particular, the caller should try
+    to be reasonably aware of the potential size of the table being returned.
+    The most relevant factors are average line size, the number of lines being
+    requested, file size, and total amount of memory available to the Lua
+    interpreter.
+--]]
+  local lines = {}
+  local line_frag = ""
+  local expected_size = 0
+  
   while to_be_read >= BUFSIZE do
-    buffer = file:read(BUFSIZE)
-    if not buffer or #buffer ~= BUFSIZE then
+    if line_frag then
+      buffer = line_frag .. file:read(BUFSIZE)
+      expected_size = BUFSIZE + #line_frag
+    else
+      buffer = file:read(BUFSIZE)
+      expected_size = BUFSIZE
+    end
+    if not buffer or #buffer ~= expected_size then
       error("Unexpected EOF; possible file truncation.")
     end
-    io.stdout:write(buffer)
+    for line in buffer:gmatch('[^\n]+') do
+      lines[#lines + 1] = line
+    end
+    if string.sub(buffer, -1) ~= '\n' and to_be_read ~= BUFSIZE then
+      line_frag = lines[#lines]
+      lines[#lines] = nil
+    else
+      line_frag = nil
+    end
     to_be_read = to_be_read - BUFSIZE
   end
   
   if to_be_read > 0 then
     BUFSIZE = to_be_read
-    buffer = file:read(BUFSIZE)
-    if not buffer or #buffer ~= BUFSIZE then
+    if line_frag then
+      buffer = line_frag .. file:read(BUFSIZE)
+      expected_size = BUFSIZE + #line_frag
+    else
+      buffer = file:read(BUFSIZE)
+      expected_size = BUFSIZE
+    end
+    if not buffer or #buffer ~= expected_size then
       error("Unexpected EOF; possible file truncation.")
     end
-    io.stdout:write(buffer)
+    for line in buffer:gmatch('[^\n]+') do
+      lines[#lines + 1] = line
+    end
   end
-  
-  file:close()
-  return
+  return lines  
 end
