@@ -117,8 +117,7 @@ function tail(file_to_read, n_lines, stream)
 
 --[[
     To avoid potential memory bottlenecks in output, we read 8K blocks and
-    write them to stdout or, if tail() was called with stream = false, build
-    a table of lines to return. Redirection of the stdout stream, if desired,
+    write them to stdout. Redirection of the stdout stream, if desired,
     is left to the caller.
 --]]
   if stream == true or stream == nil then
@@ -145,6 +144,7 @@ function tail(file_to_read, n_lines, stream)
   end
   
 --[[
+    If stream = false, build and return a table of lines, one line per index.
     To save on memory during the process of building our table, we read in 8K
     blocks and split them up into the constituent lines. However, this does not
     mean that we have eliminated all need to care about memory when calling the
