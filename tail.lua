@@ -2,7 +2,7 @@
     Tail writes the lesser of n lines or all lines in the passed file to
     io.stdout in 8K blocks or, optionally, returns a table.
     
-    Usage: tail("/path/to/file", last_n_lines, [stream])
+    Usage: tail.tail("/path/to/file", last_n_lines, [stream])
     
     Optional boolean stream parameter specifies whether a stream to stdout is
     desired. If false, a table of lines is returned with one line per index.
@@ -15,6 +15,8 @@
     Files which are truncated during runtime raise an error indicating that we
     encountered an unexpected EOF.
 --]]
+
+local namespace = {}
 
 local function get_block(file, offset, BUFSIZE)
   file:seek("set", offset)
@@ -87,61 +89,36 @@ local function get_offset(file_to_read, n_lines, filesize)
   return 0
 end
 
---[[
-    So as not to clutter the global namespace, we only expose the tail()
-    function to the caller. All other functions are local.
---]]
-function tail(file_to_read, n_lines, stream)
-  if type(file_to_read) ~= 'string' or #file_to_read < 1 then
-    error("non-empty string expected.")
-  end
-  if type(n_lines) ~= 'number' or n_lines < 1 or n_lines % 1 ~= 0 then
-    error("positive integer expected.")
-  end
-  if type(stream) ~= 'boolean' and type(stream) ~= nil then
-    error("expected boolean or nil.")
-  end
-  
-  local file = assert(io.open(file_to_read, "r"))
-  local size = file:seek("end")
-  local offset = get_offset(file, n_lines, size)
-  
---[[
-    The file may have been appended since we first opened it. Therefore, we
-    specify the number of bytes to be read.
---]]
-  local to_be_read = size - offset
-  local buffer = ''
-  local BUFSIZE = 2^13
-  file:seek("set", offset)
 
 --[[
     To avoid potential memory bottlenecks in output, we read 8K blocks and
     write them to stdout. Redirection of the stdout stream, if desired,
     is left to the caller.
 --]]
-  if stream == true or stream == nil then
-    while to_be_read >= BUFSIZE do
-      buffer = file:read(BUFSIZE)
-      if not buffer or #buffer ~= BUFSIZE then
-        error("Unexpected EOF; possible file truncation.")
-      end
-      io.stdout:write(buffer)
-      to_be_read = to_be_read - BUFSIZE
+
+local function linestream(BUFSIZE, file, to_be_read)
+  local buffer = ''
+  while to_be_read >= BUFSIZE do
+    buffer = file:read(BUFSIZE)
+    if not buffer or #buffer ~= BUFSIZE then
+      error("Unexpected EOF; possible file truncation.")
     end
-  
-  
-    if to_be_read > 0 then
-      BUFSIZE = to_be_read
-      buffer = file:read(BUFSIZE)
-      if not buffer or #buffer ~= BUFSIZE then
-        error("Unexpected EOF; possible file truncation.")
-      end
-      io.stdout:write(buffer)
-    end
-    file:close()
-    return
+    io.stdout:write(buffer)
+    to_be_read = to_be_read - BUFSIZE
   end
+  
+  
+  if to_be_read > 0 then
+    BUFSIZE = to_be_read
+    buffer = file:read(BUFSIZE)
+    if not buffer or #buffer ~= BUFSIZE then
+      error("Unexpected EOF; possible file truncation.")
+    end
+    io.stdout:write(buffer)
+  end
+  file:close()
+  return
+end
   
 --[[
     If stream = false, build and return a table of lines, one line per index.
@@ -154,8 +131,11 @@ function tail(file_to_read, n_lines, stream)
     requested, file size, and total amount of memory available to the Lua
     interpreter.
 --]]
+
+local function linetable(BUFSIZE, file, to_be_read)
+  local buffer = ''
   local lines = {}
-  local line_frag = ""
+  local line_frag = ''
   local expected_size = 0
   
   while to_be_read >= BUFSIZE do
@@ -199,3 +179,40 @@ function tail(file_to_read, n_lines, stream)
   end
   return lines  
 end
+
+
+--[[
+    So as not to pollute the global namespace when called with require(), we
+    only export the tail() function when we return the namespace table.
+--]]
+
+function namespace.tail(file_to_read, n_lines, stream)
+  if type(file_to_read) ~= 'string' or #file_to_read < 1 then
+    error("non-empty string expected.")
+  end
+  if type(n_lines) ~= 'number' or n_lines < 1 or n_lines % 1 ~= 0 then
+    error("positive integer expected.")
+  end
+  if stream and type(stream) ~= 'boolean' then
+    error("expected boolean or nil.")
+  end
+  
+  local file = assert(io.open(file_to_read, "r"))
+  local size = file:seek("end")
+  local offset = get_offset(file, n_lines, size)
+  
+--[[
+    The file may have been appended since we first opened it. Therefore, we
+    specify the number of bytes to be read.
+--]]
+
+  local to_be_read = size - offset
+  local BUFSIZE = 2^13
+  file:seek("set", offset)
+
+  if stream == true or stream == nil then return linestream(BUFSIZE, file, to_be_read) end
+  return linetable(BUFSIZE, file, to_be_read)
+end
+     
+    
+return namespace
